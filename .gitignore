@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+package-lock.json
+__pycache__/
+*.pyc
+.Python
+venv/
+env/
+ENV/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+journalctl-*.log
+
+# Runtime data
+.cache/
+*.pid
+tmp/
+
+# Agent-specific runtime
+~/.config/ai-agents/registry.json
+~/.*/learnings.log
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Build outputs (if any)
+dist/
+build/
