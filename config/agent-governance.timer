@@ -1,9 +1,9 @@
 [Unit]
-Description=Weekly AI Agent Governance Sync
+Description=Daily AI Agent Governance Sync
 Documentation=https://github.com/user/agent-governance/blob/main/docs/PHASES.md
 
 [Timer]
-OnCalendar=Sun *-*-* 02:00:00
+OnCalendar=*-*-* 02:00:00
 Persistent=true
 Unit=agent-governance.service
 

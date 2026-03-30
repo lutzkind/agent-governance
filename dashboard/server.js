@@ -188,6 +188,23 @@ app.post('/api/instructions/:id/rollback', (req, res) => {
   res.json({ success: true, instruction: instr });
 });
 
+// Get global agent instruction files
+app.get('/api/global-instructions', (req, res) => {
+  const files = [
+    { agent: 'Claude', file: path.join(os.homedir(), '.claude', 'CLAUDE.md') },
+    { agent: 'Gemini', file: path.join(os.homedir(), '.gemini', 'GEMINI.md') },
+    { agent: 'Codex', file: '/root/AGENTS.md' },
+  ];
+
+  const result = files.map(f => ({
+    agent: f.agent,
+    path: f.file,
+    content: fs.existsSync(f.file) ? fs.readFileSync(f.file, 'utf8') : null
+  }));
+
+  res.json(result);
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
