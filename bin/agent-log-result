@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+
+/**
+ * agent-log-result
+ * Record learning outcomes for cross-agent consensus voting
+ * 
+ * Usage:
+ *   agent-log-result --task task-name --success \
+ *     --insight "what was learned" \
+ *     --confidence 0.95 \
+ *     --affected-instruction database-access
+ */
+
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const argv = process.argv.slice(2);
+
+// Parse arguments
+function getArg(flag) {
+  const idx = argv.indexOf(flag);
+  return idx !== -1 && idx + 1 < argv.length ? argv[idx + 1] : null;
+}
+
+function hasFlag(flag) {
+  return argv.includes(flag);
+}
+
+function main() {
+  // Validate required args
+  const taskId = getArg('--task');
+  const insight = getArg('--insight');
+  const affected = getArg('--affected-instruction');
+  const confidenceStr = getArg('--confidence');
+  const success = hasFlag('--success');
+  
+  if (!taskId || !insight || !affected || !confidenceStr) {
+    console.error(`agent-log-result - Log learning outcome
+
+Usage:
+  agent-log-result --task TASK_ID --success \\
+    --insight "INSIGHT" \\
+    --confidence CONFIDENCE \\
+    --affected-instruction INSTRUCTION_ID
+
+Options:
+  --task TASK_ID                          Task identifier
+  --success                               Flag: task succeeded (omit for failure)
+  --insight TEXT                          What was learned
+  --confidence 0.0-1.0                    Confidence level
+  --affected-instruction ID               Instruction this learning could improve
+  --tags tag1,tag2                        Optional comma-separated tags
+`);
+    process.exit(1);
+  }
+  
+  const confidence = parseFloat(confidenceStr);
+  if (isNaN(confidence) || confidence < 0 || confidence > 1) {
+    console.error('❌ Confidence must be a number between 0 and 1');
+    process.exit(1);
+  }
+  
+  // Detect agent from environment or home directory
+  const homeDir = os.homedir();
+  let agent = null;
+  
+  if (process.env.AGENT_NAME) {
+    agent = process.env.AGENT_NAME;
+  } else {
+    // Guess from CWD or environment
+    for (const a of ['gemini', 'claude', 'codex', 'copilot', 'paperclip']) {
+      if (process.cwd().includes(a) || process.env.PATH.includes(a)) {
+        agent = a;
+        break;
+      }
+    }
+  }
+  
+  if (!agent) {
+    console.warn('⚠️  Could not detect agent name. Set AGENT_NAME environment variable.');
+    agent = 'unknown';
+  }
+  
+  // Create learning log entry
+  const entry = {
+    agent: agent,
+    timestamp: new Date().toISOString(),
+    task_id: taskId,
+    task_name: getArg('--task-name') || taskId,
+    success: success,
+    insight: insight,
+    confidence: confidence,
+    affected_instruction: affected,
+    tags: getArg('--tags') ? getArg('--tags').split(',') : [],
+    metrics: {}
+  };
+  
+  // Parse optional metrics
+  const metricsArg = getArg('--metrics');
+  if (metricsArg) {
+    const pairs = metricsArg.split(',');
+    pairs.forEach(pair => {
+      const [key, value] = pair.split('=');
+      entry.metrics[key.trim()] = isNaN(value) ? value : parseFloat(value);
+    });
+  }
+  
+  // Create learning log directory if needed
+  const agentDir = path.join(homeDir, `.${agent}`);
+  if (!fs.existsSync(agentDir)) {
+    fs.mkdirSync(agentDir, { recursive: true });
+  }
+  
+  const logFile = path.join(agentDir, 'learnings.log');
+  
+  // Append to log (JSON-lines format)
+  fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
+  
+  console.log(`✅ Learning logged for ${agent}`);
+  console.log(`   Task: ${taskId}`);
+  console.log(`   Insight: ${insight}`);
+  console.log(`   Confidence: ${(confidence * 100).toFixed(0)}%`);
+  console.log(`   Affects: ${affected}`);
+  console.log(`   Logged to: ${logFile}`);
+}
+
+main();

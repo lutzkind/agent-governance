@@ -1,0 +1,211 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent Instructions Registry Schema",
+  "description": "Centralized registry for all AI agent instructions with versioning, metadata, and cross-platform applicability",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Registry format version (semver)",
+      "default": "1.0.0"
+    },
+    "last_sync": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last time registry was synchronized across agents"
+    },
+    "instructions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "Unique instruction identifier"
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable instruction title"
+          },
+          "description": {
+            "type": "string",
+            "description": "Full description of the instruction"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "database-access",
+              "email-with-attachments",
+              "mcp-architecture",
+              "agent-communication",
+              "security",
+              "performance",
+              "other"
+            ],
+            "description": "Instruction category for organization"
+          },
+          "file": {
+            "type": "string",
+            "description": "Source file path containing instruction (e.g. /root/AGENTS.md)"
+          },
+          "section": {
+            "type": "string",
+            "description": "Section heading in source file"
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["gemini", "claude", "codex", "copilot", "paperclip", "all"]
+            },
+            "description": "Applicable AI agent platforms"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d+\\.\\d+$",
+            "description": "Semantic version of this instruction"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "deprecated", "archived", "in-review"],
+            "default": "active",
+            "description": "Current status of instruction"
+          },
+          "created_date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When instruction was first created"
+          },
+          "last_reviewed": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last review date"
+          },
+          "next_review": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Scheduled next review date (2 weeks from last_reviewed)"
+          },
+          "review_interval_days": {
+            "type": "integer",
+            "default": 14,
+            "description": "How often to schedule reviews"
+          },
+          "change_log": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "date": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "change": {
+                  "type": "string"
+                },
+                "voted_by": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5,
+                  "description": "Number of agents that approved this change"
+                },
+                "rollback_available": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "required": ["version", "date", "change"]
+            },
+            "description": "Immutable history of all changes"
+          },
+          "related_learnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IDs of approved learnings that improved this instruction"
+          }
+        },
+        "required": ["id", "title", "description", "category", "platforms", "version", "status"]
+      }
+    },
+    "learnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^learning-\\d+$",
+            "description": "Unique learning identifier"
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title of learning"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed description"
+          },
+          "origin_agent": {
+            "type": "string",
+            "enum": ["gemini", "claude", "codex", "copilot", "paperclip"],
+            "description": "Which agent discovered this learning"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When learning was discovered"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "approved", "rejected"],
+            "default": "pending",
+            "description": "Voting status"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Confidence level (0-1) in this learning"
+          },
+          "affects_instruction": {
+            "type": "string",
+            "description": "ID of instruction this learning could improve"
+          },
+          "performance_impact": {
+            "type": "object",
+            "properties": {
+              "metric": {
+                "type": "string"
+              },
+              "improvement_percent": {
+                "type": "number"
+              }
+            }
+          },
+          "votes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["approved", "rejected", "pending", "abstain"]
+            },
+            "description": "Per-agent voting results"
+          },
+          "approved_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When learning reached consensus (if approved)"
+          }
+        },
+        "required": ["id", "title", "origin_agent", "date", "affects_instruction"]
+      }
+    }
+  },
+  "required": ["version", "instructions", "learnings"]
+}

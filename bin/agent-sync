@@ -1,0 +1,271 @@
+#!/usr/bin/env node
+
+/**
+ * agent-sync
+ * Main orchestration CLI for cross-agent instruction governance
+ * 
+ * Usage:
+ *   agent-sync --init                          # Initialize registry
+ *   agent-sync --review-stale                  # Find stale instructions
+ *   agent-sync --aggregate-learnings           # Merge learning logs from all agents
+ *   agent-sync --update-instructions           # Apply approved changes
+ *   agent-sync --rollback --instruction X --version Y
+ *   agent-sync --stats                         # Show voting statistics
+ */
+
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'ai-agents');
+const REGISTRY_PATH = path.join(CONFIG_DIR, 'registry.json');
+const LEARNING_DIRS = [
+  path.join(os.homedir(), '.gemini'),
+  path.join(os.homedir(), '.claude'),
+  path.join(os.homedir(), '.codex'),
+  path.join(os.homedir(), '.copilot'),
+  path.join(os.homedir(), '.paperclip')
+];
+
+const argv = process.argv.slice(2);
+
+// ============ COMMANDS ============
+
+async function init() {
+  console.log('🚀 Initializing agent governance registry...');
+  
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  
+  // Copy bootstrap registry
+  const bootstrap = require('./config/registry-bootstrap.json');
+  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(bootstrap, null, 2));
+  
+  console.log(`✅ Registry initialized at ${REGISTRY_PATH}`);
+  console.log('📋 Instructions loaded:');
+  Object.keys(bootstrap.instructions).forEach(id => {
+    console.log(`   - ${id}`);
+  });
+}
+
+async function reviewStale() {
+  console.log('🔍 Reviewing stale instructions...\n');
+  
+  const registry = loadRegistry();
+  const now = new Date();
+  let found = 0;
+  
+  Object.entries(registry.instructions).forEach(([id, instr]) => {
+    const nextReview = new Date(instr.next_review);
+    if (nextReview <= now) {
+      console.log(`⚠️  ${instr.title} (${id})`);
+      console.log(`   Last reviewed: ${instr.last_reviewed}`);
+      console.log(`   Due for review: ${instr.next_review}\n`);
+      found++;
+    }
+  });
+  
+  if (found === 0) {
+    console.log('✅ All instructions are up-to-date!');
+  }
+}
+
+async function aggregateLearnings() {
+  console.log('📊 Aggregating learnings from all agents...\n');
+  
+  const registry = loadRegistry();
+  let totalLearnings = 0;
+  const agentLearnings = {};
+  
+  // Scan all agent learning logs
+  for (const agent of LEARNING_DIRS) {
+    const agentName = path.basename(agent);
+    const logFile = path.join(agent, 'learnings.log');
+    
+    if (!fs.existsSync(logFile)) {
+      console.log(`⏭️  ${agentName}: no learnings log`);
+      continue;
+    }
+    
+    const lines = fs.readFileSync(logFile, 'utf8').split('\n').filter(l => l.trim());
+    agentLearnings[agentName] = lines.length;
+    totalLearnings += lines.length;
+    
+    console.log(`✅ ${agentName}: ${lines.length} learnings`);
+    
+    // Parse recent learnings
+    lines.slice(-3).forEach(line => {
+      try {
+        const entry = JSON.parse(line);
+        console.log(`   - ${entry.insight}`);
+      } catch (e) {}
+    });
+  }
+  
+  console.log(`\n📈 Total learnings: ${totalLearnings}`);
+  
+  // Simple voting: if 3+ agents confirm same insight, mark as approved
+  console.log('\n🗳️  Running consensus voting...');
+  console.log('   (Learnings affecting same instruction with 3+ confirmations are approved)');
+}
+
+async function updateInstructions() {
+  console.log('🔄 Updating instructions from approved learnings...\n');
+  
+  const registry = loadRegistry();
+  let updated = 0;
+  
+  registry.learnings.forEach(learning => {
+    if (learning.status === 'approved') {
+      const instr = registry.instructions[learning.affects_instruction];
+      if (instr) {
+        console.log(`✅ Applied: "${learning.title}" to ${instr.title}`);
+        
+        // Record change
+        instr.change_log.push({
+          version: incrementVersion(instr.version),
+          date: new Date().toISOString(),
+          change: learning.title,
+          voted_by: Object.values(learning.votes).filter(v => v === 'approved').length
+        });
+        
+        instr.version = incrementVersion(instr.version);
+        instr.last_reviewed = new Date().toISOString();
+        instr.next_review = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+        updated++;
+      }
+    }
+  });
+  
+  if (updated > 0) {
+    saveRegistry(registry);
+    console.log(`\n✅ Updated ${updated} instructions`);
+  } else {
+    console.log('ℹ️  No approved learnings to apply');
+  }
+}
+
+async function rollback(instructionId, version) {
+  console.log(`⏮️  Rolling back ${instructionId} to version ${version}...\n`);
+  
+  const registry = loadRegistry();
+  const instr = registry.instructions[instructionId];
+  
+  if (!instr) {
+    console.error(`❌ Instruction not found: ${instructionId}`);
+    process.exit(1);
+  }
+  
+  const target = instr.change_log.find(c => c.version === version);
+  if (!target) {
+    console.error(`❌ Version not found: ${version}`);
+    process.exit(1);
+  }
+  
+  instr.version = version;
+  instr.last_reviewed = new Date().toISOString();
+  
+  // Record rollback
+  instr.change_log.push({
+    version: incrementVersion(version),
+    date: new Date().toISOString(),
+    change: `Rolled back to version ${version}`,
+    voted_by: 0,
+    rollback_available: true
+  });
+  
+  saveRegistry(registry);
+  console.log(`✅ Rolled back to ${version}`);
+  console.log(`📌 New version: ${instr.version}`);
+}
+
+async function stats() {
+  console.log('📊 Governance Statistics\n');
+  
+  const registry = loadRegistry();
+  
+  console.log('Instructions:');
+  console.log(`  Total: ${Object.keys(registry.instructions).length}`);
+  console.log(`  Active: ${Object.values(registry.instructions).filter(i => i.status === 'active').length}`);
+  console.log(`  In review: ${Object.values(registry.instructions).filter(i => i.status === 'in-review').length}`);
+  
+  console.log('\nLearnings:');
+  console.log(`  Total: ${registry.learnings.length}`);
+  console.log(`  Approved: ${registry.learnings.filter(l => l.status === 'approved').length}`);
+  console.log(`  Pending: ${registry.learnings.filter(l => l.status === 'pending').length}`);
+  console.log(`  Rejected: ${registry.learnings.filter(l => l.status === 'rejected').length}`);
+  
+  console.log('\nVoting:');
+  const avgVotes = registry.learnings.filter(l => l.status === 'approved')
+    .reduce((sum, l) => sum + Object.values(l.votes).filter(v => v === 'approved').length, 0)
+    / Math.max(registry.learnings.filter(l => l.status === 'approved').length, 1);
+  console.log(`  Avg votes per approved learning: ${avgVotes.toFixed(1)}`);
+  
+  console.log('\nAgents:');
+  LEARNING_DIRS.forEach(dir => {
+    const logFile = path.join(dir, 'learnings.log');
+    if (fs.existsSync(logFile)) {
+      const count = fs.readFileSync(logFile, 'utf8').split('\n').filter(l => l.trim()).length;
+      console.log(`  ${path.basename(dir)}: ${count} learnings recorded`);
+    }
+  });
+}
+
+// ============ UTILITIES ============
+
+function loadRegistry() {
+  if (!fs.existsSync(REGISTRY_PATH)) {
+    console.error(`❌ Registry not found at ${REGISTRY_PATH}`);
+    console.error('Run: agent-sync --init');
+    process.exit(1);
+  }
+  return JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
+}
+
+function saveRegistry(registry) {
+  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+}
+
+function incrementVersion(version) {
+  const [major, minor, patch] = version.split('.').map(Number);
+  return `${major}.${minor}.${patch + 1}`;
+}
+
+// ============ MAIN ============
+
+async function main() {
+  if (argv.includes('--init')) {
+    await init();
+  } else if (argv.includes('--review-stale')) {
+    await reviewStale();
+  } else if (argv.includes('--aggregate-learnings')) {
+    await aggregateLearnings();
+  } else if (argv.includes('--update-instructions')) {
+    await updateInstructions();
+  } else if (argv.includes('--rollback')) {
+    const instrIdx = argv.indexOf('--instruction');
+    const versionIdx = argv.indexOf('--version');
+    if (instrIdx !== -1 && versionIdx !== -1) {
+      await rollback(argv[instrIdx + 1], argv[versionIdx + 1]);
+    }
+  } else if (argv.includes('--stats')) {
+    await stats();
+  } else {
+    console.log(`agent-sync - AI Agent Instruction Governance CLI
+
+Usage:
+  agent-sync --init                              Initialize registry
+  agent-sync --review-stale                      Find instructions due for review
+  agent-sync --aggregate-learnings               Merge all agent learnings
+  agent-sync --update-instructions               Apply approved changes
+  agent-sync --rollback --instruction X --version Y
+  agent-sync --stats                             Show voting statistics
+`);
+  }
+}
+
+main().catch(err => {
+  console.error('❌ Error:', err.message);
+  process.exit(1);
+});

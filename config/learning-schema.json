@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent Learning Journal Entry Schema",
+  "description": "JSON-lines format for immutable learning logs from each agent. One entry per line.",
+  "type": "object",
+  "properties": {
+    "agent": {
+      "type": "string",
+      "enum": ["gemini", "claude", "codex", "copilot", "paperclip"],
+      "description": "Which agent generated this learning"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this learning was recorded"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "ID of task during which learning occurred"
+    },
+    "task_name": {
+      "type": "string",
+      "description": "Human-readable task name"
+    },
+    "success": {
+      "type": "boolean",
+      "description": "Did task succeed?"
+    },
+    "insight": {
+      "type": "string",
+      "description": "What was learned"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Confidence level in this learning (0-1)"
+    },
+    "affected_instruction": {
+      "type": "string",
+      "description": "Which instruction could benefit from this learning"
+    },
+    "tags": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Optional tags for search/filtering"
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [{"type": "number"}, {"type": "string"}]
+      },
+      "description": "Optional performance metrics (duration_ms, memory_used_mb, etc)"
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "message": {"type": "string"},
+        "stack": {"type": "string"},
+        "recoverable": {"type": "boolean"}
+      },
+      "description": "If task failed, error details"
+    }
+  },
+  "required": ["agent", "timestamp", "task_id", "success", "insight", "confidence", "affected_instruction"],
+  "additionalProperties": false
+}

@@ -1,0 +1,82 @@
+{
+  "version": "1.0.0",
+  "last_sync": "2026-03-30T00:00:00Z",
+  "instructions": {
+    "database-access": {
+      "id": "database-access",
+      "title": "Centralized Database Access via Registry",
+      "description": "All agents use dbx CLI to query any database (MySQL, Postgres, SQLite, etc) via central registry at ~/.config/ai-db/registry.json. Each agent has read-only access to databases; use dbx get/list/query commands for safe access.",
+      "category": "database-access",
+      "file": "/root/AGENTS.md",
+      "section": "Database Access Pattern",
+      "platforms": ["gemini", "claude", "codex", "copilot", "paperclip"],
+      "version": "1.0.0",
+      "status": "active",
+      "created_date": "2026-03-20T00:00:00Z",
+      "last_reviewed": "2026-03-30T00:00:00Z",
+      "next_review": "2026-04-13T00:00:00Z",
+      "review_interval_days": 14,
+      "change_log": [
+        {
+          "version": "1.0.0",
+          "date": "2026-03-30T00:00:00Z",
+          "change": "Initial instruction set. Defines dbx CLI patterns for safe multi-agent database access.",
+          "voted_by": 5,
+          "rollback_available": true
+        }
+      ],
+      "related_learnings": []
+    },
+    "email-with-attachments": {
+      "id": "email-with-attachments",
+      "title": "Email with Attachments via gws CLI",
+      "description": "All agents use gws-email wrapper (installed at /root/.local/bin/gws-email) to send emails with MIME multipart attachments. Wrapper adds --attach flag to gws CLI for seamless attachment support. Files must be saved to /root/mcp-shared/ before attaching.",
+      "category": "email-with-attachments",
+      "file": "/root/AGENTS.md",
+      "section": "Email with Attachments via gws CLI",
+      "platforms": ["gemini", "claude", "codex", "copilot", "paperclip"],
+      "version": "1.0.0",
+      "status": "active",
+      "created_date": "2026-03-25T00:00:00Z",
+      "last_reviewed": "2026-03-30T00:00:00Z",
+      "next_review": "2026-04-13T00:00:00Z",
+      "review_interval_days": 14,
+      "change_log": [
+        {
+          "version": "1.0.0",
+          "date": "2026-03-30T00:00:00Z",
+          "change": "Initial instruction set. Defines gws-email wrapper for secure attachment support.",
+          "voted_by": 5,
+          "rollback_available": true
+        }
+      ],
+      "related_learnings": []
+    },
+    "mcp-architecture": {
+      "id": "mcp-architecture",
+      "title": "MCP Server Docker Architecture",
+      "description": "All MCP tools run in Docker containers using base image mcp-optimized:latest with v16 server.js wrapper. Use SSE transport on port 3000. Mount /root/mcp-shared (read-only) for file access. Each tool gets unique host port and Codex bridge mapping.",
+      "category": "mcp-architecture",
+      "file": "/root/AGENTS.md",
+      "section": "Standardized MCP Architecture",
+      "platforms": ["gemini", "claude", "codex", "copilot", "paperclip"],
+      "version": "1.0.0",
+      "status": "active",
+      "created_date": "2026-03-28T00:00:00Z",
+      "last_reviewed": "2026-03-30T00:00:00Z",
+      "next_review": "2026-04-13T00:00:00Z",
+      "review_interval_days": 14,
+      "change_log": [
+        {
+          "version": "1.0.0",
+          "date": "2026-03-30T00:00:00Z",
+          "change": "Initial instruction set. Standardizes MCP container deployment across all platforms.",
+          "voted_by": 5,
+          "rollback_available": true
+        }
+      ],
+      "related_learnings": []
+    }
+  },
+  "learnings": []
+}

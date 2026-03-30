@@ -1,0 +1,107 @@
+#!/usr/bin/env node
+
+/**
+ * agent-suggest-improvements
+ * Propose instruction improvements based on learnings
+ * 
+ * Usage:
+ *   agent-suggest-improvements \
+ *     --instruction database-access \
+ *     --title "Use connection pooling" \
+ *     --rationale "Performance improvement observed" \
+ *     --platform codex \
+ *     --priority high
+ */
+
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'ai-agents');
+const REGISTRY_PATH = path.join(CONFIG_DIR, 'registry.json');
+
+const argv = process.argv.slice(2);
+
+function getArg(flag) {
+  const idx = argv.indexOf(flag);
+  return idx !== -1 && idx + 1 < argv.length ? argv[idx + 1] : null;
+}
+
+function main() {
+  const instrId = getArg('--instruction');
+  const title = getArg('--title');
+  const rationale = getArg('--rationale');
+  const platform = getArg('--platform') || 'all';
+  const priority = getArg('--priority') || 'medium';
+  
+  if (!instrId || !title || !rationale) {
+    console.error(`agent-suggest-improvements - Propose instruction updates
+
+Usage:
+  agent-suggest-improvements \\
+    --instruction ID \\
+    --title "TITLE" \\
+    --rationale "WHY" \\
+    [--platform PLATFORM] \\
+    [--priority PRIORITY]
+
+Options:
+  --instruction ID            Target instruction
+  --title TEXT                Improvement title
+  --rationale TEXT            Why this improves the instruction
+  --platform NAME             Affected platform (default: all)
+  --priority PRIORITY         High/medium/low (default: medium)
+`);
+    process.exit(1);
+  }
+  
+  // Load registry
+  if (!fs.existsSync(REGISTRY_PATH)) {
+    console.error(`❌ Registry not found at ${REGISTRY_PATH}`);
+    process.exit(1);
+  }
+  
+  const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
+  
+  // Create learning entry
+  const learningId = `learning-${Date.now()}`;
+  const learning = {
+    id: learningId,
+    title: title,
+    description: rationale,
+    origin_agent: process.env.AGENT_NAME || 'unknown',
+    date: new Date().toISOString(),
+    status: 'pending',
+    confidence: 0.8,
+    affects_instruction: instrId,
+    performance_impact: {
+      metric: 'unspecified',
+      improvement_percent: 0
+    },
+    votes: {
+      gemini: 'pending',
+      claude: 'pending',
+      codex: 'pending',
+      copilot: 'pending',
+      paperclip: 'pending'
+    },
+    priority: priority,
+    platform: platform
+  };
+  
+  registry.learnings.push(learning);
+  
+  // Save
+  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+  
+  console.log('✅ Improvement proposal created');
+  console.log(`   ID: ${learningId}`);
+  console.log(`   Instruction: ${instrId}`);
+  console.log(`   Improvement: ${title}`);
+  console.log(`   Platform: ${platform}`);
+  console.log(`   Priority: ${priority}`);
+  console.log(`\n📋 Awaiting votes from:  gemini, claude, codex, copilot, paperclip`);
+  console.log(`   Run: agent-sync --stats`);
+}
+
+main();

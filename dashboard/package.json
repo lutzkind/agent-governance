@@ -1,0 +1,27 @@
+{
+  "name": "agent-governance-dashboard",
+  "version": "1.0.0",
+  "description": "Web dashboard for AI Agent Governance System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js",
+    "build": "cd public && npm run build",
+    "test": "jest"
+  },
+  "keywords": ["ai-agents", "governance", "learning", "consensus"],
+  "author": "Codex",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

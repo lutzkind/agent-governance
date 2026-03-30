@@ -1,0 +1,18 @@
+[Unit]
+Description=AI Agent Governance System
+Documentation=https://github.com/user/agent-governance/blob/main/docs/PHASES.md
+After=network.target
+Wants=agent-governance.timer
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/agent-sync --aggregate-learnings && /usr/local/bin/agent-sync --update-instructions
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-governance
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/.local/bin"
+Environment="HOME=/root"
+
+[Install]
+WantedBy=multi-user.target
