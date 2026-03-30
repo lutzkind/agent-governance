@@ -313,7 +313,8 @@
     <div class="section">
       <div class="tabs">
         <button class="tab-btn active" onclick="switchTab('learnings')">💡 Learnings</button>
-        <button class="tab-btn" onclick="switchTab('global')">📋 Global Instructions</button>
+        <button class="tab-btn" onclick="switchTab('instructions')">📌 Instructions</button>
+        <button class="tab-btn" onclick="switchTab('global')">📋 Agent Files</button>
       </div>
 
       <div id="tab-learnings" class="tab-content active">
@@ -325,6 +326,13 @@
         <div id="learnings-container">
           <div class="loading">Loading...</div>
         </div>
+      </div>
+
+      <div id="tab-instructions" class="tab-content">
+        <h2>🌐 Core Instructions <span style="font-size:0.65em;color:#666;font-weight:normal">— apply to all agents</span></h2>
+        <div id="global-instr-container" style="margin-bottom:30px"><div class="loading">Loading...</div></div>
+        <h2>🎯 Agent-Specific Instructions <span style="font-size:0.65em;color:#666;font-weight:normal">— targeted rules</span></h2>
+        <div id="agent-instr-container"><div class="loading">Loading...</div></div>
       </div>
 
       <div id="tab-global" class="tab-content">
@@ -409,6 +417,36 @@
       document.getElementById('tab-' + name).classList.add('active');
       event.target.classList.add('active');
       if (name === 'global') loadGlobalInstructions();
+      if (name === 'instructions') loadInstructions();
+    }
+
+    function instrCardHtml(i) {
+      const platforms = (i.platforms || []).join(', ');
+      const badge = i.scope === 'global'
+        ? '<span class="status-badge status-approved">global</span>'
+        : `<span class="status-badge status-pending">${platforms}</span>`;
+      return `
+        <div class="learning-item">
+          <div class="learning-title">${i.title} ${badge}</div>
+          <div class="learning-meta">
+            <span>v${i.version}</span>
+            <span>Next review: ${i.next_review ? i.next_review.slice(0,10) : '—'}</span>
+          </div>
+          <p>${i.description}</p>
+        </div>`;
+    }
+
+    async function loadInstructions() {
+      try {
+        const res = await fetch('/api/instructions');
+        const all = await res.json();
+        const global = all.filter(i => i.scope === 'global');
+        const agent = all.filter(i => i.scope === 'agent');
+        document.getElementById('global-instr-container').innerHTML =
+          global.map(instrCardHtml).join('') || '<p style="color:#999">None</p>';
+        document.getElementById('agent-instr-container').innerHTML =
+          agent.map(instrCardHtml).join('') || '<p style="color:#999">None</p>';
+      } catch(e) { console.error(e); }
     }
 
     async function loadGlobalInstructions() {
