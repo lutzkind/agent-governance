@@ -20,6 +20,8 @@ const app = express();
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'ai-agents');
 const REGISTRY_PATH = path.join(CONFIG_DIR, 'registry.json');
 const PORT = process.env.PORT || 3000;
+const STALE_THRESHOLD_DAYS = 30;
+const PURGE_THRESHOLD_DAYS = 90;
 const DASHBOARD_USER = process.env.DASHBOARD_USER || 'lutzkind';
 const DASHBOARD_PASS = process.env.DASHBOARD_PASS || 'changeme';
 const SECRET = process.env.DASHBOARD_SECRET || crypto.randomBytes(32).toString('hex');
@@ -33,6 +35,34 @@ function loadRegistry() {
 
 function saveRegistry(data) {
   fs.writeFileSync(REGISTRY_PATH, JSON.stringify(data, null, 2));
+}
+
+function daysSince(dateStr) {
+  return (Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24);
+}
+
+function expireStale(registry) {
+  let count = 0;
+  (registry.learnings || []).forEach(l => {
+    if (l.status === 'pending' && daysSince(l.date || l.created_at) > STALE_THRESHOLD_DAYS) {
+      l.status = 'stale';
+      l.stale_at = new Date().toISOString();
+      l.stale_reason = `No consensus after ${STALE_THRESHOLD_DAYS} days`;
+      count++;
+    }
+  });
+  return count;
+}
+
+function purgeOld(registry) {
+  const terminal = ['superseded', 'stale', 'rejected'];
+  const before = registry.learnings.length;
+  registry.learnings = registry.learnings.filter(l => {
+    if (!terminal.includes(l.status)) return true;
+    const anchor = l.superseded_at || l.stale_at || l.rejected_at || l.date;
+    return daysSince(anchor) < PURGE_THRESHOLD_DAYS;
+  });
+  return before - registry.learnings.length;
 }
 
 function parseCookies(req) {
@@ -269,6 +299,9 @@ app.get('/api/stats', (req, res) => {
     learnings_pending: learnings.filter(l => l.status === 'pending').length,
     learnings_approved: learnings.filter(l => l.status === 'approved').length,
     learnings_rejected: learnings.filter(l => l.status === 'rejected').length,
+    learnings_stale: learnings.filter(l => l.status === 'stale').length,
+    learnings_superseded: learnings.filter(l => l.status === 'superseded').length,
+    learnings_needs_review: learnings.filter(l => l.status === 'needs-review').length,
     agent_contributions: {},
     last_updated: new Date().toISOString()
   };
@@ -312,6 +345,27 @@ app.post('/api/instructions/:id/rollback', (req, res) => {
 
   saveRegistry(registry);
   res.json({ success: true, instruction: instr });
+});
+
+// Trigger learning lifecycle cleanup
+app.post('/api/learnings/cleanup', (req, res) => {
+  const registry = loadRegistry();
+  const staled = expireStale(registry);
+  const purged = purgeOld(registry);
+  saveRegistry(registry);
+  res.json({ staled, purged, total: registry.learnings.length });
+});
+
+// Flag a learning as needs-review manually
+app.post('/api/learnings/:id/flag-review', (req, res) => {
+  const registry = loadRegistry();
+  const learning = (registry.learnings || []).find(l => l.id === req.params.id);
+  if (!learning) return res.status(404).json({ error: 'Not found' });
+  learning.status = 'needs-review';
+  learning.needs_review_at = new Date().toISOString();
+  learning.needs_review_reason = req.body.reason || 'Manually flagged for re-review';
+  saveRegistry(registry);
+  res.json(learning);
 });
 
 // Get global agent instruction files

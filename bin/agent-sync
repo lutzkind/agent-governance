@@ -3,12 +3,13 @@
 /**
  * agent-sync
  * Main orchestration CLI for cross-agent instruction governance
- * 
+ *
  * Usage:
  *   agent-sync --init                          # Initialize registry
  *   agent-sync --review-stale                  # Find stale instructions
  *   agent-sync --aggregate-learnings           # Merge learning logs from all agents
- *   agent-sync --update-instructions           # Apply approved changes
+ *   agent-sync --update-instructions           # Apply approved changes, mark superseded
+ *   agent-sync --cleanup-learnings             # Expire stale pending, purge old superseded
  *   agent-sync --rollback --instruction X --version Y
  *   agent-sync --stats                         # Show voting statistics
  */
@@ -27,190 +28,12 @@ const LEARNING_DIRS = [
   path.join(os.homedir(), '.paperclip')
 ];
 
+// Pending learnings older than this are marked stale
+const STALE_THRESHOLD_DAYS = 30;
+// Superseded/stale/rejected learnings older than this are purged
+const PURGE_THRESHOLD_DAYS = 90;
+
 const argv = process.argv.slice(2);
-
-// ============ COMMANDS ============
-
-async function init() {
-  console.log('🚀 Initializing agent governance registry...');
-  
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  }
-  
-  // Copy bootstrap registry
-  const bootstrap = require('./config/registry-bootstrap.json');
-  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(bootstrap, null, 2));
-  
-  console.log(`✅ Registry initialized at ${REGISTRY_PATH}`);
-  console.log('📋 Instructions loaded:');
-  Object.keys(bootstrap.instructions).forEach(id => {
-    console.log(`   - ${id}`);
-  });
-}
-
-async function reviewStale() {
-  console.log('🔍 Reviewing stale instructions...\n');
-  
-  const registry = loadRegistry();
-  const now = new Date();
-  let found = 0;
-  
-  Object.entries(registry.instructions).forEach(([id, instr]) => {
-    const nextReview = new Date(instr.next_review);
-    if (nextReview <= now) {
-      console.log(`⚠️  ${instr.title} (${id})`);
-      console.log(`   Last reviewed: ${instr.last_reviewed}`);
-      console.log(`   Due for review: ${instr.next_review}\n`);
-      found++;
-    }
-  });
-  
-  if (found === 0) {
-    console.log('✅ All instructions are up-to-date!');
-  }
-}
-
-async function aggregateLearnings() {
-  console.log('📊 Aggregating learnings from all agents...\n');
-  
-  const registry = loadRegistry();
-  let totalLearnings = 0;
-  const agentLearnings = {};
-  
-  // Scan all agent learning logs
-  for (const agent of LEARNING_DIRS) {
-    const agentName = path.basename(agent);
-    const logFile = path.join(agent, 'learnings.log');
-    
-    if (!fs.existsSync(logFile)) {
-      console.log(`⏭️  ${agentName}: no learnings log`);
-      continue;
-    }
-    
-    const lines = fs.readFileSync(logFile, 'utf8').split('\n').filter(l => l.trim());
-    agentLearnings[agentName] = lines.length;
-    totalLearnings += lines.length;
-    
-    console.log(`✅ ${agentName}: ${lines.length} learnings`);
-    
-    // Parse recent learnings
-    lines.slice(-3).forEach(line => {
-      try {
-        const entry = JSON.parse(line);
-        console.log(`   - ${entry.insight}`);
-      } catch (e) {}
-    });
-  }
-  
-  console.log(`\n📈 Total learnings: ${totalLearnings}`);
-  
-  // Simple voting: if 3+ agents confirm same insight, mark as approved
-  console.log('\n🗳️  Running consensus voting...');
-  console.log('   (Learnings affecting same instruction with 3+ confirmations are approved)');
-}
-
-async function updateInstructions() {
-  console.log('🔄 Updating instructions from approved learnings...\n');
-  
-  const registry = loadRegistry();
-  let updated = 0;
-  
-  registry.learnings.forEach(learning => {
-    if (learning.status === 'approved') {
-      const instr = registry.instructions[learning.affects_instruction];
-      if (instr) {
-        console.log(`✅ Applied: "${learning.title}" to ${instr.title}`);
-        
-        // Record change
-        instr.change_log.push({
-          version: incrementVersion(instr.version),
-          date: new Date().toISOString(),
-          change: learning.title,
-          voted_by: Object.values(learning.votes).filter(v => v === 'approved').length
-        });
-        
-        instr.version = incrementVersion(instr.version);
-        instr.last_reviewed = new Date().toISOString();
-        instr.next_review = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-        updated++;
-      }
-    }
-  });
-  
-  if (updated > 0) {
-    saveRegistry(registry);
-    console.log(`\n✅ Updated ${updated} instructions`);
-  } else {
-    console.log('ℹ️  No approved learnings to apply');
-  }
-}
-
-async function rollback(instructionId, version) {
-  console.log(`⏮️  Rolling back ${instructionId} to version ${version}...\n`);
-  
-  const registry = loadRegistry();
-  const instr = registry.instructions[instructionId];
-  
-  if (!instr) {
-    console.error(`❌ Instruction not found: ${instructionId}`);
-    process.exit(1);
-  }
-  
-  const target = instr.change_log.find(c => c.version === version);
-  if (!target) {
-    console.error(`❌ Version not found: ${version}`);
-    process.exit(1);
-  }
-  
-  instr.version = version;
-  instr.last_reviewed = new Date().toISOString();
-  
-  // Record rollback
-  instr.change_log.push({
-    version: incrementVersion(version),
-    date: new Date().toISOString(),
-    change: `Rolled back to version ${version}`,
-    voted_by: 0,
-    rollback_available: true
-  });
-  
-  saveRegistry(registry);
-  console.log(`✅ Rolled back to ${version}`);
-  console.log(`📌 New version: ${instr.version}`);
-}
-
-async function stats() {
-  console.log('📊 Governance Statistics\n');
-  
-  const registry = loadRegistry();
-  
-  console.log('Instructions:');
-  console.log(`  Total: ${Object.keys(registry.instructions).length}`);
-  console.log(`  Active: ${Object.values(registry.instructions).filter(i => i.status === 'active').length}`);
-  console.log(`  In review: ${Object.values(registry.instructions).filter(i => i.status === 'in-review').length}`);
-  
-  console.log('\nLearnings:');
-  console.log(`  Total: ${registry.learnings.length}`);
-  console.log(`  Approved: ${registry.learnings.filter(l => l.status === 'approved').length}`);
-  console.log(`  Pending: ${registry.learnings.filter(l => l.status === 'pending').length}`);
-  console.log(`  Rejected: ${registry.learnings.filter(l => l.status === 'rejected').length}`);
-  
-  console.log('\nVoting:');
-  const avgVotes = registry.learnings.filter(l => l.status === 'approved')
-    .reduce((sum, l) => sum + Object.values(l.votes).filter(v => v === 'approved').length, 0)
-    / Math.max(registry.learnings.filter(l => l.status === 'approved').length, 1);
-  console.log(`  Avg votes per approved learning: ${avgVotes.toFixed(1)}`);
-  
-  console.log('\nAgents:');
-  LEARNING_DIRS.forEach(dir => {
-    const logFile = path.join(dir, 'learnings.log');
-    if (fs.existsSync(logFile)) {
-      const count = fs.readFileSync(logFile, 'utf8').split('\n').filter(l => l.trim()).length;
-      console.log(`  ${path.basename(dir)}: ${count} learnings recorded`);
-    }
-  });
-}
 
 // ============ UTILITIES ============
 
@@ -232,6 +55,290 @@ function incrementVersion(version) {
   return `${major}.${minor}.${patch + 1}`;
 }
 
+function daysSince(dateStr) {
+  return (Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24);
+}
+
+// ============ LEARNING LIFECYCLE ============
+
+/**
+ * Mark pending learnings as stale if they've been waiting too long.
+ * Returns count of learnings marked stale.
+ */
+function expireStale(registry) {
+  let count = 0;
+  (registry.learnings || []).forEach(l => {
+    if (l.status === 'pending' && daysSince(l.date || l.created_at) > STALE_THRESHOLD_DAYS) {
+      l.status = 'stale';
+      l.stale_at = new Date().toISOString();
+      l.stale_reason = `No consensus after ${STALE_THRESHOLD_DAYS} days`;
+      count++;
+    }
+  });
+  return count;
+}
+
+/**
+ * Purge very old terminal-state learnings (superseded/stale/rejected > 90 days).
+ * Returns count of learnings removed.
+ */
+function purgeOld(registry) {
+  const terminal = ['superseded', 'stale', 'rejected'];
+  const before = registry.learnings.length;
+  registry.learnings = registry.learnings.filter(l => {
+    if (!terminal.includes(l.status)) return true;
+    const anchor = l.superseded_at || l.stale_at || l.rejected_at || l.date;
+    return daysSince(anchor) < PURGE_THRESHOLD_DAYS;
+  });
+  return before - registry.learnings.length;
+}
+
+/**
+ * Mark approved learnings as superseded after they've been applied to an instruction.
+ */
+function markSuperseded(registry, learningId, instrId, newVersion) {
+  const learning = (registry.learnings || []).find(l => l.id === learningId);
+  if (!learning) return;
+  learning.status = 'superseded';
+  learning.superseded_at = new Date().toISOString();
+  learning.applied_to_instruction = instrId;
+  learning.applied_to_version = newVersion;
+}
+
+/**
+ * Flag approved learnings as needs-review when their instruction is rolled back.
+ */
+function flagNeedsReview(registry, instrId, rolledBackToVersion) {
+  let count = 0;
+  (registry.learnings || []).forEach(l => {
+    if (l.affects_instruction === instrId && l.status === 'approved') {
+      l.status = 'needs-review';
+      l.needs_review_at = new Date().toISOString();
+      l.needs_review_reason = `Instruction ${instrId} rolled back to ${rolledBackToVersion}`;
+      count++;
+    }
+  });
+  return count;
+}
+
+// ============ COMMANDS ============
+
+async function init() {
+  console.log('🚀 Initializing agent governance registry...');
+  if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+
+  const bootstrapPath = path.join(path.dirname(__dirname), 'config', 'registry-bootstrap.json');
+  const bootstrap = JSON.parse(fs.readFileSync(bootstrapPath, 'utf8'));
+  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(bootstrap, null, 2));
+
+  console.log(`✅ Registry initialized at ${REGISTRY_PATH}`);
+  Object.keys(bootstrap.instructions).forEach(id => console.log(`   - ${id}`));
+}
+
+async function reviewStale() {
+  console.log('🔍 Reviewing stale instructions...\n');
+  const registry = loadRegistry();
+  const now = new Date();
+  let found = 0;
+
+  Object.entries(registry.instructions).forEach(([id, instr]) => {
+    if (new Date(instr.next_review) <= now) {
+      console.log(`⚠️  ${instr.title} (${id})`);
+      console.log(`   Last reviewed: ${instr.last_reviewed}`);
+      console.log(`   Due for review: ${instr.next_review}\n`);
+      found++;
+    }
+  });
+
+  if (found === 0) console.log('✅ All instructions are up-to-date!');
+}
+
+async function aggregateLearnings() {
+  console.log('📊 Aggregating learnings from all agents...\n');
+
+  const registry = loadRegistry();
+  if (!registry.learnings) registry.learnings = [];
+
+  // Build a set of existing learning IDs to avoid duplicates
+  const existingIds = new Set(registry.learnings.map(l => l.id));
+  let added = 0;
+
+  for (const agentDir of LEARNING_DIRS) {
+    const agentName = path.basename(agentDir).replace(/^\./, '');
+    const logFile = path.join(agentDir, 'learnings.log');
+
+    if (!fs.existsSync(logFile)) {
+      console.log(`⏭️  ${agentName}: no learnings log`);
+      continue;
+    }
+
+    const lines = fs.readFileSync(logFile, 'utf8').split('\n').filter(l => l.trim());
+    let agentAdded = 0;
+
+    lines.forEach(line => {
+      try {
+        const entry = JSON.parse(line);
+        // Deterministic ID: agent + task + insight hash
+        const id = `${entry.agent || agentName}-${entry.task_id}-${Buffer.from(entry.insight).toString('base64').slice(0, 8)}`;
+        if (existingIds.has(id)) return;
+
+        registry.learnings.push({
+          id,
+          status: 'pending',
+          origin_agent: entry.agent || agentName,
+          title: entry.insight.slice(0, 80),
+          description: entry.insight,
+          affects_instruction: entry.affected_instruction,
+          confidence: entry.confidence,
+          success: entry.success,
+          date: entry.timestamp,
+          created_at: entry.timestamp,
+          tags: entry.tags || [],
+          votes: {}
+        });
+
+        existingIds.add(id);
+        agentAdded++;
+        added++;
+      } catch (e) {}
+    });
+
+    console.log(`✅ ${agentName}: ${lines.length} in log, ${agentAdded} new`);
+  }
+
+  console.log(`\n📥 Added ${added} new learnings`);
+
+  // Expire stale pending learnings
+  const staled = expireStale(registry);
+  if (staled > 0) console.log(`⏰ Marked ${staled} pending learnings as stale (>${STALE_THRESHOLD_DAYS} days)`);
+
+  saveRegistry(registry);
+  console.log('💾 Registry updated');
+}
+
+async function updateInstructions() {
+  console.log('🔄 Updating instructions from approved learnings...\n');
+
+  const registry = loadRegistry();
+  let updated = 0;
+
+  registry.learnings.forEach(learning => {
+    if (learning.status !== 'approved') return;
+
+    const instr = registry.instructions[learning.affects_instruction];
+    if (!instr) return;
+
+    const newVersion = incrementVersion(instr.version);
+    console.log(`✅ Applying: "${learning.title}" → ${instr.title} (${instr.version} → ${newVersion})`);
+
+    instr.change_log.push({
+      version: newVersion,
+      date: new Date().toISOString(),
+      change: learning.description,
+      voted_by: Object.values(learning.votes || {}).filter(v => v === 'approve').length,
+      learning_id: learning.id,
+      rollback_available: true
+    });
+
+    instr.version = newVersion;
+    instr.last_reviewed = new Date().toISOString();
+    instr.next_review = new Date(Date.now() + instr.review_interval_days * 24 * 60 * 60 * 1000).toISOString();
+
+    // Archive the learning now that it's been applied
+    markSuperseded(registry, learning.id, instr.id, newVersion);
+    updated++;
+  });
+
+  if (updated > 0) {
+    saveRegistry(registry);
+    console.log(`\n✅ Updated ${updated} instructions, archived ${updated} learnings as superseded`);
+  } else {
+    console.log('ℹ️  No approved learnings to apply');
+  }
+}
+
+async function cleanupLearnings() {
+  console.log('🧹 Cleaning up learnings...\n');
+
+  const registry = loadRegistry();
+
+  const staled = expireStale(registry);
+  const purged = purgeOld(registry);
+
+  if (staled > 0) console.log(`⏰ Marked ${staled} pending learnings as stale (no consensus in >${STALE_THRESHOLD_DAYS} days)`);
+  if (purged > 0) console.log(`🗑️  Purged ${purged} old terminal-state learnings (>${PURGE_THRESHOLD_DAYS} days)`);
+  if (staled === 0 && purged === 0) console.log('✅ Nothing to clean up');
+
+  saveRegistry(registry);
+
+  const counts = ['pending', 'approved', 'stale', 'superseded', 'rejected', 'needs-review']
+    .map(s => `${s}: ${registry.learnings.filter(l => l.status === s).length}`)
+    .join('  |  ');
+  console.log(`\n📊 Current: ${counts}`);
+}
+
+async function rollback(instructionId, version) {
+  console.log(`⏮️  Rolling back ${instructionId} to version ${version}...\n`);
+
+  const registry = loadRegistry();
+  const instr = registry.instructions[instructionId];
+
+  if (!instr) { console.error(`❌ Instruction not found: ${instructionId}`); process.exit(1); }
+
+  const target = instr.change_log.find(c => c.version === version);
+  if (!target) { console.error(`❌ Version not found: ${version}`); process.exit(1); }
+
+  const newVersion = incrementVersion(instr.version);
+  instr.change_log.push({
+    version: newVersion,
+    date: new Date().toISOString(),
+    change: `Rolled back to version ${version}`,
+    voted_by: 0,
+    rollback_available: true
+  });
+
+  instr.version = newVersion;
+  instr.last_reviewed = new Date().toISOString();
+
+  // Flag approved learnings for this instruction as needing re-review
+  const flagged = flagNeedsReview(registry, instructionId, version);
+  if (flagged > 0) {
+    console.log(`⚠️  Flagged ${flagged} approved learnings as needs-review (instruction was rolled back)`);
+  }
+
+  saveRegistry(registry);
+  console.log(`✅ Rolled back to ${version} (recorded as ${newVersion})`);
+}
+
+async function stats() {
+  console.log('📊 Governance Statistics\n');
+  const registry = loadRegistry();
+  const instrs = Object.values(registry.instructions);
+  const learnings = registry.learnings || [];
+
+  console.log('Instructions:');
+  console.log(`  Total:         ${instrs.length}`);
+  console.log(`  Global (core): ${instrs.filter(i => i.scope === 'global').length}`);
+  console.log(`  Agent-specific:${instrs.filter(i => i.scope === 'agent').length}`);
+  console.log(`  Active:        ${instrs.filter(i => i.status === 'active').length}`);
+
+  console.log('\nLearnings:');
+  ['pending', 'approved', 'rejected', 'stale', 'superseded', 'needs-review'].forEach(s => {
+    const n = learnings.filter(l => l.status === s).length;
+    if (n > 0) console.log(`  ${s.padEnd(14)}: ${n}`);
+  });
+  console.log(`  ${'total'.padEnd(14)}: ${learnings.length}`);
+
+  console.log('\nAgents:');
+  LEARNING_DIRS.forEach(dir => {
+    const logFile = path.join(dir, 'learnings.log');
+    if (fs.existsSync(logFile)) {
+      const count = fs.readFileSync(logFile, 'utf8').split('\n').filter(l => l.trim()).length;
+      console.log(`  ${path.basename(dir).replace(/^\./, '').padEnd(12)}: ${count} learnings recorded`);
+    }
+  });
+}
+
 // ============ MAIN ============
 
 async function main() {
@@ -243,11 +350,15 @@ async function main() {
     await aggregateLearnings();
   } else if (argv.includes('--update-instructions')) {
     await updateInstructions();
+  } else if (argv.includes('--cleanup-learnings')) {
+    await cleanupLearnings();
   } else if (argv.includes('--rollback')) {
     const instrIdx = argv.indexOf('--instruction');
     const versionIdx = argv.indexOf('--version');
     if (instrIdx !== -1 && versionIdx !== -1) {
       await rollback(argv[instrIdx + 1], argv[versionIdx + 1]);
+    } else {
+      console.error('Usage: agent-sync --rollback --instruction <id> --version <version>');
     }
   } else if (argv.includes('--stats')) {
     await stats();
@@ -255,12 +366,13 @@ async function main() {
     console.log(`agent-sync - AI Agent Instruction Governance CLI
 
 Usage:
-  agent-sync --init                              Initialize registry
+  agent-sync --init                              Initialize registry from bootstrap
   agent-sync --review-stale                      Find instructions due for review
-  agent-sync --aggregate-learnings               Merge all agent learnings
-  agent-sync --update-instructions               Apply approved changes
-  agent-sync --rollback --instruction X --version Y
-  agent-sync --stats                             Show voting statistics
+  agent-sync --aggregate-learnings               Import agent logs, expire stale pending
+  agent-sync --update-instructions               Apply approved learnings, mark superseded
+  agent-sync --cleanup-learnings                 Expire stale, purge old terminal learnings
+  agent-sync --rollback --instruction X --version Y   Rollback + flag related learnings
+  agent-sync --stats                             Show full statistics
 `);
   }
 }
